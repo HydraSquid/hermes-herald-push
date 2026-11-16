@@ -88,6 +88,30 @@ def test_commands_register_and_answer_with_gateway_keys(tmp_path):
     assert store.devices() == []
 
 
+def test_the_plugin_method_answers_what_the_command_prints(tmp_path):
+    # A shared gateway's socket has no sessionless command.dispatch: Kyllene calls the plugin method there.
+    store = Store(tmp_path)
+    data, _ = phone()
+    call = commands.make_rpc(commands.make_handler(store, "t", lambda: True, trusted=lambda: True))
+    assert call({"arg": "info"}, session_id=None)["devices"] == 0
+    answer = call({"arg": "register " + json.dumps(data)}, session_id=None)
+    assert answer["ok"] is True and answer["gateway"] == store.public_identity()
+    assert call({"arg": "info"}, session_id="a-chat")["devices"] == 1
+    assert call({"arg": "unregister " + data["device_id"]}) == {"ok": True}
+
+
+@pytest.mark.parametrize("params", [{}, {"arg": 5}, {"arg": None}, {"arg": ["info"]}, None, "info"])
+def test_the_plugin_method_refuses_anything_but_a_string(tmp_path, params):
+    call = commands.make_rpc(commands.make_handler(Store(tmp_path), "t", lambda: True, trusted=lambda: True))
+    assert call(params, session_id=None) == {"ok": False, "error": "arg must be a string"}
+
+
+def test_the_plugin_method_keeps_the_commands_limits(tmp_path):
+    call = commands.make_rpc(commands.make_handler(Store(tmp_path), "t", lambda: True, trusted=lambda: True))
+    assert call({"arg": "register " + "a" * 20000})["error"] == "too long"
+    assert call({"arg": "register {not json"})["error"] == "not JSON"
+
+
 def test_trusted_surface_fails_closed_outside_the_dashboard():
     assert commands.trusted_surface() is False
 
@@ -299,3 +323,48 @@ def test_a_ring_carries_the_call_and_fits_one_push(tmp_path):
     # Any other tool is only a nudge: the call is fetched over the socket.
     other = plugin.wake_message({"id": "e" * 32, "tool": "phone_location", "args": {"fresh": True}})
     assert other["type"] == "phone_request" and "args" not in other and "reason" not in other
+
+
+class _Ctx:
+    """What Hermes hands ``register``: the slash command, the tools and, on newer Hermes, plugin methods."""
+
+    def __init__(self):
+        self.commands, self.rpcs = {}, {}
+
+    def register_tool(self, *args, **kwargs):
+        pass
+
+    def on_unload(self, callback):
+        pass
+
+    def register_command(self, name, handler, **kwargs):
+        self.commands[name] = handler
+
+
+class _RpcCtx(_Ctx):
+    def register_rpc(self, name, handler):
+        self.rpcs[name] = handler
+
+
+def _register(monkeypatch, tmp_path, ctx):
+    from herald_push import plugin
+    monkeypatch.setattr(plugin, "_root", lambda: tmp_path)
+    monkeypatch.setattr(plugin, "is_long_lived_process", lambda: False)
+    plugin.register(ctx)
+    return ctx
+
+
+def test_register_serves_the_plugin_method_where_hermes_has_them(monkeypatch, tmp_path):
+    ctx = _register(monkeypatch, tmp_path, _RpcCtx())
+    assert list(ctx.rpcs) == ["command"]
+    data, _ = phone()
+    # Outside the dashboard the slash command refuses; the method is only ever reached over the gateway's socket.
+    assert json.loads(ctx.commands["herald-push"]("info"))["ok"] is False
+    assert ctx.rpcs["command"]({"arg": "register " + json.dumps(data)}, session_id=None)["ok"] is True
+    # One phone list behind both.
+    assert ctx.rpcs["command"]({"arg": "info"}, session_id=None)["devices"] == 1
+
+
+def test_register_still_loads_on_a_hermes_without_plugin_methods(monkeypatch, tmp_path):
+    ctx = _register(monkeypatch, tmp_path, _Ctx())
+    assert "herald-push" in ctx.commands and ctx.rpcs == {}

@@ -42,6 +42,22 @@ def trusted_surface() -> bool:
         return False
 
 
+def make_rpc(handle: Callable[[str], str]) -> Callable[..., dict]:
+    """``plugin.herald-push.command``: [handle]'s operations as a plugin JSON-RPC method, ``{"arg": "info"}``.
+
+    A gateway that serves ``/api/ws`` itself (one gateway shared by several profiles) runs the socket on its
+    session authority. There ``command.dispatch`` needs a chat to run in, and Kyllene registers a phone without
+    one; a plugin method needs none. It answers with the same object the slash command prints as JSON.
+    """
+    def call(params, *, session_id=None, **_):
+        arg = params.get("arg") if isinstance(params, dict) else None
+        if not isinstance(arg, str):
+            return {"ok": False, "error": "arg must be a string"}
+        return json.loads(handle(arg))
+
+    return call
+
+
 def phone_command(phones: Phones, raw: str, reply: Callable[..., str]) -> str:
     """``phone tools <json>``: what this phone has switched on. ``phone pending <json>``: the tool calls
     waiting for it. ``phone answer <json>``: the result of one. ``phone here <json>``: this phone sends messages

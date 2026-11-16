@@ -8,14 +8,17 @@ import threading
 from pathlib import Path
 
 from . import push
-from .commands import make_handler
+from .commands import make_handler, make_rpc
 from .phone import CALL_TOOL, Phones, register_tools
 from .store import Store
 from .watcher import Watcher, is_long_lived_process
 
 log = logging.getLogger(__name__)
 
-VERSION = "0.7.2"
+VERSION = "0.8.0"
+
+# Served as ``plugin.herald-push.command`` (Hermes prefixes the plugin's id).
+RPC_COMMAND = "command"
 
 # A ring's push: what it says fits ntfy's 4096-byte message limit once sealed (base64 grows it by a third).
 MAX_REASON_BYTES = 600
@@ -70,6 +73,14 @@ def register(ctx) -> None:
     ctx.register_command("herald-push", make_handler(store, VERSION, watching, phones=phones, root=root),
                          description="Kyllene push notifications and phone tools: phones registered with this gateway",
                          args_hint="info | register <json> | unregister <id> | test <id> | phone …")
+    # The same operations as a plugin method, for a gateway whose socket has no sessionless command.dispatch.
+    # A plugin method is only reachable over the gateway's authenticated socket by a client allowed to control
+    # sessions, never from a chat, so it doesn't ask which surface a chat came from. Older Hermes has no such
+    # methods: there the slash command is the only way in.
+    register_rpc = getattr(ctx, "register_rpc", None)
+    if callable(register_rpc):
+        register_rpc(RPC_COMMAND, make_rpc(
+            make_handler(store, VERSION, watching, trusted=lambda: True, phones=phones, root=root)))
 
     if not is_long_lived_process():
         return

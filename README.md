@@ -13,7 +13,7 @@ to and registers the phone, in one step.
 Or by hand on the gateway:
 
 ```
-hermes plugins install https://github.com/Giton22/hermes-herald-push
+hermes plugins install https://github.com/HydraSquid/hermes-herald-push
 ```
 
 ## How it works
@@ -22,6 +22,12 @@ hermes plugins install https://github.com/Giton22/hermes-herald-push
   `/herald-push register`. The command refuses to run on messaging platforms, so someone chatting with a bot on
   Telegram can't add their own phone. At registration the phone and the gateway swap public keys, and each pins
   the other's.
+- **Shared gateways (0.8.0).** A gateway that serves the socket itself, one process for several profiles, runs
+  slash commands inside a chat and refuses one sent without. There the app calls the plugin's own JSON-RPC
+  method, `plugin.herald-push.command {"arg": "register <json>"}`, which takes the same arguments and answers
+  with the same object. Hermes only serves a plugin method over its authenticated socket, to a client allowed
+  to control sessions, so it is never reachable from a chat. Such a gateway has no `plugins.manage` either:
+  install the plugin from its command line.
 - **Watching.** One watcher, in the dashboard or the messaging gateway process, reads every profile's
   `state.db` read-only and pushes each new final reply in a bot's Bot Chat.
 - **Crypto.** P-256 ECDH to an ephemeral key, HKDF-SHA256, AES-256-GCM bound to the topic, and ECDSA P-256
